@@ -1,76 +1,85 @@
 # quantum_annealing_sim.py
 """
-Quantum Annealing Simulation using D-Wave Ocean
-Example: Solving a small Quadratic Assignment Problem (QAP)
+Quantum Annealing Simulation: Quadratic Assignment Problem (QAP)
+Fixed version with proper variable unpacking
 """
 
 from dimod import BinaryQuadraticModel
 from neal import SimulatedAnnealingSampler
 import numpy as np
+import re
 
-def create_qap_bqm(facilities, locations):
+def create_qap_bqm(distances, flows, penalty=50):
     """
-    Create BQM for Quadratic Assignment Problem
-    facilities: distance matrix between facilities
-    locations: flow matrix between locations
+    Create BQM for QAP using binary variables x[i,p] = 1 if facility i at location p
     """
-    n = len(facilities)
+    n = len(distances)
     bqm = BinaryQuadraticModel('BINARY')
 
-    # Linear terms (encourage one assignment per facility/location)
-    for i in range(n):
-        for p in range(n):
-            var = (i, p)
-            bqm.add_variable(var, 0)
+    # Variables: x_{i,p} represented as string 'i_p'
+    def var(i, p): return f"{i}_{p}"
 
-    # Constraint: each facility assigned to exactly one location
-    for i in range(n):
-        bqm.add_linear_equality_constraint(
-            [(f'f{i}_l{p}', 1.0) for p in range(n)], constant=-1, lagrange_multiplier=10
-        )
-
-    # Constraint: each location gets exactly one facility
-    for p in range(n):
-        bqm.add_linear_equality_constraint(
-            [(f'f{i}_l{p}', 1.0) for i in range(n)], constant=-1, lagrange_multiplier=10
-        )
-
-    # Objective: minimize cost = sum flow[i][j] * distance[p][q] * x[i,p] * x[j,q]
+    # Objective: sum_{i,j,p,q} flow[i][j] * dist[p][q] * x[i,p] * x[j,q]
     for i in range(n):
         for j in range(n):
-            if i == j:
-                continue
+            if i == j: continue
             for p in range(n):
                 for q in range(n):
-                    if p == q:
-                        continue
-                    cost = facilities[i][j] * locations[p][q]
-                    bqm.add_quadratic(f'f{i}_l{p}', f'f{j}_l{q}', cost)
+                    if p == q: continue
+                    cost = flows[i][j] * distances[p][q]
+                    bqm.add_quadratic(var(i, p), var(j, q), cost)
+
+    # Constraint 1: Each facility to exactly one location
+    for i in range(n):
+        terms = [(var(i, p), 1.0) for p in range(n)]
+        bqm.add_linear_equality_constraint(terms, constant=-1, lagrange_multiplier=penalty)
+
+    # Constraint 2: Each location gets exactly one facility
+    for p in range(n):
+        terms = [(var(i, p), 1.0) for i in range(n)]
+        bqm.add_linear_equality_constraint(terms, constant=-1, lagrange_multiplier=penalty)
 
     return bqm
 
-# Example: 3 facilities, 3 locations
+def parse_solution(sample):
+    """Convert sample dict with 'i_p' keys into assignment list"""
+    assignment = {}
+    pattern = re.compile(r"(\d+)_(\d+)")
+    for var, val in sample.items():
+        if val == 1:
+            match = pattern.match(var)
+            if match:
+                i, p = int(match.group(1)), int(match.group(2))
+                assignment[i] = p
+    return assignment
+
+# === Example: 3x3 QAP ===
 D = np.array([[0, 1, 2],
               [1, 0, 3],
-              [2, 3, 0]])  # Distance between facilities
+              [2, 3, 0]])  # Distances between locations
 
 F = np.array([[0, 5, 2],
               [5, 0, 3],
-              [2, 3, 0]])  # Flow between locations
+              [2, 3, 0]])  # Flows between facilities
 
-# Create BQM
-bqm = create_qap_bqm(D, F)
-
-# Use simulated annealing
+# Build and solve
+bqm = create_qap_bqm(D, F, penalty=100)
 sampler = SimulatedAnnealingSampler()
 sampleset = sampler.sample(bqm, num_reads=1000)
 
-# Get best solution
-best = sampleset.first.sample
-energy = sampleset.first.energy
+best = sampleset.first
+print(f"Best energy: {best.energy}")
+print("Assignment (facility → location):")
 
-print("Best energy:", energy)
-print("Assignment (facility i -> location p):")
-for (i, p), val in best.items():
-    if val == 1:
-        print(f"Facility {i} -> Location {p}")
+assignment = parse_solution(best.sample)
+for facility, location in sorted(assignment.items()):
+    print(f"  Facility {facility} → Location {location}")
+
+# Optional: validate constraints
+print("\nValidation:")
+for i in assignment:
+    locs = [loc for f, loc in assignment.items() if f == i]
+    print(f"  Facility {i}: assigned to 1 location → {len(locs) == 1}")
+
+used_locs = list(assignment.values())
+print(f"  All locations used once → {len(set(used_locs)) == len(used_locs)}")
