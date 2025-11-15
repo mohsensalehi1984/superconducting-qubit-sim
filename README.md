@@ -80,9 +80,4 @@ Generates:
 
 ---
 
-Let me know if you want:
-- Circuit QED (qubit + cavity)
-- Pulse-level control with `qutip-control`
-- Real IBMQ backend calibration data
-
 Enjoy simulating **quantum superconductors**! ⚛️
