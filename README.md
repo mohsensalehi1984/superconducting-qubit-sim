@@ -46,7 +46,6 @@ where:
 ---
 
 Made with ❤️ for quantum computing enthusiasts.
-```
 
 ---
 
